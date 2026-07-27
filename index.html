@@ -819,39 +819,53 @@ function renderSuppliersView(){
 /* ================= Rendering: Marktprijs (experimenteel) ================= */
 
 async function vergelijkPrijs(itemName, land, resultEl){
-  resultEl.innerHTML = '⏳ Bezig met zoeken…';
+  resultEl.innerHTML = '⏳ Zoekopdracht starten…';
   try{
-    const res = await fetch(`/api/marktprijs?query=${encodeURIComponent(itemName)}&land=${land}`);
-    const data = await res.json();
+    const startRes = await fetch(`/api/marktprijs-start?query=${encodeURIComponent(itemName)}&land=${land}`);
+    const startData = await startRes.json();
 
-    if(data.error){
-      resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${data.error}</div>`;
+    if(startData.error){
+      resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${startData.error}</div>`;
       return;
     }
-    if(data.blocked){
-      resultEl.innerHTML = `<div class="blocked-msg">🚫 ${data.message}</div>`;
+    const taskId = startData.task_id;
+
+    const maxTries = 12; // 12 x 2s = 24 sec. max wachttijd
+    for(let attempt = 1; attempt <= maxTries; attempt++){
+      resultEl.innerHTML = `⏳ Bezig met zoeken… (${attempt * 2}s)`;
+      await new Promise(r => setTimeout(r, 2000));
+
+      const pollRes = await fetch(`/api/marktprijs-result?task_id=${encodeURIComponent(taskId)}`);
+      const data = await pollRes.json();
+
+      if(data.error){
+        resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${data.error}</div>`;
+        return;
+      }
+      if(!data.ready) continue; // nog niet klaar, volgende poging
+
+      if(!data.gemiddelde){
+        const debugHtml = data.debug_raw_first_item ? `
+          <div class="empty-note" style="margin-top:6px; font-family:monospace; font-size:0.7rem; white-space:pre-wrap; background:var(--bg); padding:8px; border-radius:6px;">
+            [debug] geen prijsveld herkend, ruw eerste item:\n${JSON.stringify(data.debug_raw_first_item, null, 2).slice(0, 500)}
+          </div>` : '';
+        resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}" in ${land.toUpperCase()}.</div>${debugHtml}`;
+        return;
+      }
+
+      resultEl.innerHTML = `
+        <div class="price-result">
+          <strong>Gemiddeld: € ${data.gemiddelde}</strong> · ${data.aantalGevonden} prijzen gevonden (${land.toUpperCase()})
+          <div class="price-chips">${data.gevondenPrijzen.map(p => `<span class="price-chip">€ ${Number(p).toFixed(2)}</span>`).join('')}</div>
+          <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie.</div>
+        </div>
+      `;
       return;
     }
-    if(!data.gemiddelde){
-      const debugHtml = data.debug ? `
-        <div class="empty-note" style="margin-top:6px; font-family:monospace; font-size:0.72rem; white-space:pre-wrap; background:var(--bg); padding:8px; border-radius:6px;">
-          [debug] status: ${data.debug.response_status} · url: ${data.debug.response_url} · html-lengte: ${data.debug.html_length}
-€-symbool aantal: ${data.debug.euro_symbol_count} · "EUR"-tekst aantal: ${data.debug.eur_text_count}
-prijs-achtige getallen (los van symbool): ${JSON.stringify(data.debug.bare_price_like_numbers_found)}
-${data.debug.html_snippet}
-        </div>` : '';
-      resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}" in ${land.toUpperCase()}.</div>${debugHtml}`;
-      return;
-    }
-    resultEl.innerHTML = `
-      <div class="price-result">
-        <strong>Gemiddeld: € ${data.gemiddelde}</strong> · ${data.aantalGevonden} prijzen gevonden (${land.toUpperCase()})
-        <div class="price-chips">${data.gevondenPrijzen.map(p => `<span class="price-chip">€ ${p.toFixed(2)}</span>`).join('')}</div>
-        <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie.</div>
-      </div>
-    `;
+
+    resultEl.innerHTML = `<div class="empty-note">Duurde te lang (langer dan 24 sec). Probeer straks opnieuw.</div>`;
   }catch(err){
-    resultEl.innerHTML = `<div class="blocked-msg">⚠️ Kon de testfunctie niet bereiken. Is deze al gedeployed via Vercel? Foutmelding: ${err.message}</div>`;
+    resultEl.innerHTML = `<div class="blocked-msg">⚠️ Kon de testfunctie niet bereiken. Foutmelding: ${err.message}</div>`;
   }
 }
 
@@ -863,7 +877,7 @@ function renderMarktprijsView(){
 
   const warning = document.createElement('div');
   warning.className = 'market-warning';
-  warning.innerHTML = `🧪 <strong>Experimentele testfunctie.</strong> Dit haalt Google Shopping-resultaten op zonder officiële API en zonder EAN-matching. Het kan onnauwkeurig zijn, en kan zonder waarschuwing stoppen met werken (blokkade door Google). Enkel gebruiken als ruwe indicatie.`;
+  warning.innerHTML = `🧪 <strong>Experimentele testfunctie.</strong> Dit haalt prijsdata op via DataForSEO (Google Shopping data voor BE/NL), nog zonder EAN-matching — verschillende varianten/maten van "hetzelfde" artikel kunnen dus door elkaar staan. Een opzoeking duurt 5-20 seconden. Enkel gebruiken als ruwe indicatie.`;
   wrap.appendChild(warning);
 
   allItemsFlat().forEach(it => {
