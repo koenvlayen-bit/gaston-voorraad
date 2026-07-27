@@ -76,10 +76,19 @@ module.exports = async function handler(req, res) {
 
     // TIJDELIJK — debug-informatie om te achterhalen waarom er geen prijzen
     // gevonden worden. Kan later weer verwijderd worden.
+    const euroSymbolCount = (html.match(/€/g) || []).length;
+    const eurTextCount = (html.match(/EUR/g) || []).length;
+    // Bredere test: bestaat er OVERAL in de ruwe HTML een prijs-achtig getal
+    // (bv. "97,95" of "97.95"), los van welk symbool ervoor/erna staat?
+    const bareNumberMatches = [...html.matchAll(/\b\d{1,4}[.,]\d{2}\b/g)].slice(0, 10).map(m => m[0]);
+
     const debugInfo = prices.length === 0 ? {
       response_status: response.status,
       response_url: response.url,   // toont of er een redirect gebeurde (bv. naar een cookie-pagina)
       html_length: html.length,
+      euro_symbol_count: euroSymbolCount,
+      eur_text_count: eurTextCount,
+      bare_price_like_numbers_found: bareNumberMatches,
       html_snippet: html.slice(0, 400),
     } : undefined;
 
