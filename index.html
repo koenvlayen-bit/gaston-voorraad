@@ -818,52 +818,55 @@ function renderSuppliersView(){
 
 /* ================= Rendering: Marktprijs (experimenteel) ================= */
 
-async function vergelijkPrijs(itemName, land, resultEl){
+async function vergelijkPrijs(itemName, resultEl){
   resultEl.innerHTML = '⏳ Zoekopdracht starten…';
   try{
-    const startRes = await fetch(`/api/marktprijs-start?query=${encodeURIComponent(itemName)}&land=${land}`);
-    const startData = await startRes.json();
+    // Start BE en NL gelijktijdig — de gebruiker ziet nu 1 gecombineerd resultaat.
+    const [startBE, startNL] = await Promise.all(['be','nl'].map(land =>
+      fetch(`/api/marktprijs-start?query=${encodeURIComponent(itemName)}&land=${land}`).then(r => r.json())
+    ));
 
-    if(startData.error){
-      resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${startData.error}</div>`;
+    const tasks = [];
+    if(startBE.task_id) tasks.push({ land: 'be', id: startBE.task_id });
+    if(startNL.task_id) tasks.push({ land: 'nl', id: startNL.task_id });
+
+    if(tasks.length === 0){
+      resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${startBE.error || startNL.error || 'Kon geen taak starten.'}</div>`;
       return;
     }
-    const taskId = startData.task_id;
 
+    const combinedPrices = [];
+    const doneLands = new Set();
     const maxTries = 12; // 12 x 2s = 24 sec. max wachttijd
-    for(let attempt = 1; attempt <= maxTries; attempt++){
+
+    for(let attempt = 1; attempt <= maxTries && doneLands.size < tasks.length; attempt++){
       resultEl.innerHTML = `⏳ Bezig met zoeken… (${attempt * 2}s)`;
       await new Promise(r => setTimeout(r, 2000));
 
-      const pollRes = await fetch(`/api/marktprijs-result?task_id=${encodeURIComponent(taskId)}`);
-      const data = await pollRes.json();
-
-      if(data.error){
-        resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${data.error}</div>`;
-        return;
+      for(const t of tasks){
+        if(doneLands.has(t.land)) continue;
+        const pollRes = await fetch(`/api/marktprijs-result?task_id=${encodeURIComponent(t.id)}`);
+        const data = await pollRes.json();
+        if(data.error){ doneLands.add(t.land); continue; }
+        if(!data.ready) continue;
+        doneLands.add(t.land);
+        (data.gevondenPrijzen || []).forEach(p => combinedPrices.push({ price: Number(p), land: t.land }));
       }
-      if(!data.ready) continue; // nog niet klaar, volgende poging
+    }
 
-      if(!data.gemiddelde){
-        const debugHtml = data.debug_raw_first_item ? `
-          <div class="empty-note" style="margin-top:6px; font-family:monospace; font-size:0.7rem; white-space:pre-wrap; background:var(--bg); padding:8px; border-radius:6px;">
-            [debug] geen prijsveld herkend, ruw eerste item:\n${JSON.stringify(data.debug_raw_first_item, null, 2).slice(0, 500)}
-          </div>` : '';
-        resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}" in ${land.toUpperCase()}.</div>${debugHtml}`;
-        return;
-      }
-
-      resultEl.innerHTML = `
-        <div class="price-result">
-          <strong>Gemiddeld: € ${data.gemiddelde}</strong> · ${data.aantalGevonden} prijzen gevonden (${land.toUpperCase()})
-          <div class="price-chips">${data.gevondenPrijzen.map(p => `<span class="price-chip">€ ${Number(p).toFixed(2)}</span>`).join('')}</div>
-          <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie.</div>
-        </div>
-      `;
+    if(combinedPrices.length === 0){
+      resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}".</div>`;
       return;
     }
 
-    resultEl.innerHTML = `<div class="empty-note">Duurde te lang (langer dan 24 sec). Probeer straks opnieuw.</div>`;
+    const avg = (combinedPrices.reduce((s,p) => s + p.price, 0) / combinedPrices.length).toFixed(2);
+    resultEl.innerHTML = `
+      <div class="price-result">
+        <strong>Gemiddeld: € ${avg}</strong> · ${combinedPrices.length} prijzen gevonden (BE + NL)
+        <div class="price-chips">${combinedPrices.map(p => `<span class="price-chip">€ ${p.price.toFixed(2)} <small style="opacity:0.6;">${p.land.toUpperCase()}</small></span>`).join('')}</div>
+        <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie.</div>
+      </div>
+    `;
   }catch(err){
     resultEl.innerHTML = `<div class="blocked-msg">⚠️ Kon de testfunctie niet bereiken. Foutmelding: ${err.message}</div>`;
   }
@@ -880,6 +883,16 @@ function renderMarktprijsView(){
   warning.innerHTML = `🧪 <strong>Experimentele testfunctie.</strong> Dit haalt prijsdata op via DataForSEO (Google Shopping data voor BE/NL), nog zonder EAN-matching — verschillende varianten/maten van "hetzelfde" artikel kunnen dus door elkaar staan. Een opzoeking duurt 5-20 seconden. Enkel gebruiken als ruwe indicatie.`;
   wrap.appendChild(warning);
 
+  const allBtnRow = document.createElement('div');
+  allBtnRow.style.marginBottom = '14px';
+  allBtnRow.innerHTML = `
+    <button class="btn btn-slate" id="compareAllBtn">🔍 Alles vergelijken (${allItemsFlat().length} artikelen)</button>
+    <span id="compareAllProgress" style="margin-left:10px; font-size:0.82rem; color:var(--ink-soft);"></span>
+  `;
+  wrap.appendChild(allBtnRow);
+
+  const rows = []; // { name, resultEl } — voor "Alles vergelijken"
+
   allItemsFlat().forEach(it => {
     const row = document.createElement('div');
     row.className = 'item';
@@ -893,15 +906,28 @@ function renderMarktprijsView(){
         <div class="market-result" data-action="result"></div>
       </div>
       <div class="controls">
-        <button class="btn btn-slate" data-action="vergelijkBE">🔍 Vergelijk BE</button>
-        <button class="btn btn-slate" data-action="vergelijkNL">🔍 Vergelijk NL</button>
+        <button class="btn btn-slate" data-action="vergelijk">🔍 Vergelijk (BE + NL)</button>
       </div>
     `;
     const resultEl = row.querySelector('[data-action="result"]');
-    row.querySelector('[data-action="vergelijkBE"]').onclick = () => vergelijkPrijs(it.name, 'be', resultEl);
-    row.querySelector('[data-action="vergelijkNL"]').onclick = () => vergelijkPrijs(it.name, 'nl', resultEl);
+    row.querySelector('[data-action="vergelijk"]').onclick = () => vergelijkPrijs(it.name, resultEl);
+    rows.push({ name: it.name, resultEl });
     wrap.appendChild(row);
   });
+
+  document.getElementById('compareAllBtn').onclick = async () => {
+    const btn = document.getElementById('compareAllBtn');
+    const progress = document.getElementById('compareAllProgress');
+    btn.disabled = true;
+    btn.style.opacity = '0.6';
+    for(let i = 0; i < rows.length; i++){
+      progress.textContent = `bezig: ${i + 1} van ${rows.length}…`;
+      await vergelijkPrijs(rows[i].name, rows[i].resultEl);
+    }
+    progress.textContent = `klaar — ${rows.length} artikelen vergeleken.`;
+    btn.disabled = false;
+    btn.style.opacity = '1';
+  };
 }
 
 /* ================= Render dispatcher ================= */
