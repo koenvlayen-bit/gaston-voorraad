@@ -386,10 +386,6 @@ document.getElementById('loginPassword').addEventListener('keydown', (e) => {
   if(e.key === 'Enter') checkPassword();
 });
 
-if(localStorage.getItem(UNLOCK_KEY) === '1'){
-  showApp();
-}
-
 /* ================= Category metadata (UI only — data zelf komt uit Supabase) ================= */
 const CATEGORY_META = {
   pixie:   { label: "Pixie",              emoji: "✨",  color: "#B5679C", intro: "Lichtjes, knuffels en rustige momenten voor het slapengaan." },
@@ -927,6 +923,13 @@ async function initApp(){
   await refreshAllData();
   renderAll();
   setupRealtime();
+}
+
+// Automatisch inloggen als dit toestel al eerder ontgrendeld werd.
+// Staat bewust hier, ONDER de definitie van initApp/appInitialized —
+// anders faalt dit met "Cannot access before initialization".
+if(localStorage.getItem(UNLOCK_KEY) === '1'){
+  showApp();
 }
 </script>
 
