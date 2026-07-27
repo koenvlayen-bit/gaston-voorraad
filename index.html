@@ -835,7 +835,10 @@ async function vergelijkPrijs(itemName, land, resultEl){
     if(!data.gemiddelde){
       const debugHtml = data.debug ? `
         <div class="empty-note" style="margin-top:6px; font-family:monospace; font-size:0.72rem; white-space:pre-wrap; background:var(--bg); padding:8px; border-radius:6px;">
-          [debug] status: ${data.debug.response_status} · url: ${data.debug.response_url} · html-lengte: ${data.debug.html_length}\n${data.debug.html_snippet}
+          [debug] status: ${data.debug.response_status} · url: ${data.debug.response_url} · html-lengte: ${data.debug.html_length}
+€-symbool aantal: ${data.debug.euro_symbol_count} · "EUR"-tekst aantal: ${data.debug.eur_text_count}
+prijs-achtige getallen (los van symbool): ${JSON.stringify(data.debug.bare_price_like_numbers_found)}
+${data.debug.html_snippet}
         </div>` : '';
       resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}" in ${land.toUpperCase()}.</div>${debugHtml}`;
       return;
