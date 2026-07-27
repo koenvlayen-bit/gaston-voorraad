@@ -53,6 +53,9 @@ module.exports = async function handler(req, res) {
 
     // DataForSEO product-items geven prijs meestal als een object terug
     // (bv. { current, regular, ... }) — we proberen de meest voorkomende vormen.
+    // Beperkt tot de eerste 10 (in de volgorde die Google/DataForSEO al op relevantie
+    // sorteert) — voldoende voor een indicatie, en voorkomt dat één zoekopdracht
+    // tientallen irrelevante randresultaten meetelt in het gemiddelde.
     const prices = items
       .map((it) => {
         if (it.price && typeof it.price === "object") {
@@ -61,14 +64,15 @@ module.exports = async function handler(req, res) {
         if (typeof it.price === "number") return it.price;
         return null;
       })
-      .filter((p) => typeof p === "number" && p > 0);
+      .filter((p) => typeof p === "number" && p > 0)
+      .slice(0, 10);
 
     const gemiddelde =
       prices.length > 0 ? (prices.reduce((s, p) => s + p, 0) / prices.length).toFixed(2) : null;
 
     return res.status(200).json({
       ready: true,
-      gevondenPrijzen: prices.slice(0, 15),
+      gevondenPrijzen: prices,
       aantalGevonden: prices.length,
       gemiddelde,
       // Tijdelijk: het eerste ruwe item, zodat we de exacte structuur kunnen
