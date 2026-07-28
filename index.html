@@ -837,6 +837,7 @@ async function vergelijkPrijs(itemName, resultEl){
 
     const combinedPrices = [];
     const doneLands = new Set();
+    const countPerLand = { be: null, nl: null }; // null = nooit "ready" geraakt (timeout); 0 of hoger = wel klaar
     const maxTries = 12; // 12 x 2s = 24 sec. max wachttijd
 
     for(let attempt = 1; attempt <= maxTries && doneLands.size < tasks.length; attempt++){
@@ -847,15 +848,27 @@ async function vergelijkPrijs(itemName, resultEl){
         if(doneLands.has(t.land)) continue;
         const pollRes = await fetch(`/api/marktprijs-result?task_id=${encodeURIComponent(t.id)}`);
         const data = await pollRes.json();
-        if(data.error){ doneLands.add(t.land); continue; }
+        if(data.error){ doneLands.add(t.land); countPerLand[t.land] = 'fout'; continue; }
         if(!data.ready) continue;
         doneLands.add(t.land);
-        (data.gevondenPrijzen || []).forEach(p => combinedPrices.push({ price: Number(p), land: t.land }));
+        const found = data.gevondenPrijzen || [];
+        countPerLand[t.land] = found.length;
+        found.forEach(p => combinedPrices.push({ price: Number(p), land: t.land }));
       }
     }
 
+    // Landen die nooit "ready" werden binnen de 24 sec. blijven op null staan (= timeout, geen "0 resultaten").
+    tasks.forEach(t => { if(!doneLands.has(t.land)) countPerLand[t.land] = 'timeout'; });
+
+    const landSummary = Object.entries(countPerLand)
+      .map(([land, count]) => {
+        if(count === 'timeout') return `${land.toUpperCase()}: geen antwoord binnen 24s`;
+        if(count === 'fout') return `${land.toUpperCase()}: fout bij opzoeken`;
+        return `${land.toUpperCase()}: ${count} gevonden`;
+      }).join(' · ');
+
     if(combinedPrices.length === 0){
-      resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}".</div>`;
+      resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}".<br><small>${landSummary}</small></div>`;
       return;
     }
 
@@ -864,7 +877,7 @@ async function vergelijkPrijs(itemName, resultEl){
       <div class="price-result">
         <strong>Gemiddeld: € ${avg}</strong> · ${combinedPrices.length} prijzen gevonden (BE + NL)
         <div class="price-chips">${combinedPrices.map(p => `<span class="price-chip">€ ${p.price.toFixed(2)} <small style="opacity:0.6;">${p.land.toUpperCase()}</small></span>`).join('')}</div>
-        <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie.</div>
+        <div class="disclaimer">${landSummary} · ⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie.</div>
       </div>
     `;
   }catch(err){
