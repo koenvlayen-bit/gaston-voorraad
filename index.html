@@ -846,12 +846,18 @@ async function vergelijkPrijs(itemName, ownPriceText, resultEl){
     const ownPriceNum = ownPriceMatch ? parseFloat(`${ownPriceMatch[1]}.${ownPriceMatch[2]}`) : '';
 
     const maxTries = 25; // 25 x 2s = 50 sec. max wachttijd
+    let lastDebugStatus = null;
+    let lastDebugMessage = null;
+
     for(let attempt = 1; attempt <= maxTries; attempt++){
       resultEl.innerHTML = `⏳ Bezig met zoeken… (${attempt * 2}s)`;
       await new Promise(r => setTimeout(r, 2000));
 
       const pollRes = await fetch(`/api/marktprijs-result?task_id=${encodeURIComponent(startData.task_id)}&query=${encodeURIComponent(itemName)}&expected_price=${ownPriceNum}`);
       const data = await pollRes.json();
+
+      if(data.debug_status !== undefined) lastDebugStatus = data.debug_status;
+      if(data.debug_message !== undefined) lastDebugMessage = data.debug_message;
 
       if(data.error){
         resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${data.error}</div>`;
@@ -881,7 +887,7 @@ async function vergelijkPrijs(itemName, ownPriceText, resultEl){
       return;
     }
 
-    resultEl.innerHTML = `<div class="empty-note">Duurde te lang (langer dan 50 sec) — DataForSEO's wachtrij lijkt momenteel trager te reageren. Probeer straks opnieuw.</div>`;
+    resultEl.innerHTML = `<div class="empty-note">Duurde te lang (langer dan 50 sec).<br><small>DataForSEO-status: ${lastDebugStatus ?? 'onbekend'} — ${lastDebugMessage ?? 'geen boodschap ontvangen'}</small></div>`;
   }catch(err){
     resultEl.innerHTML = `<div class="blocked-msg">⚠️ Kon de testfunctie niet bereiken. Foutmelding: ${err.message}</div>`;
   }
