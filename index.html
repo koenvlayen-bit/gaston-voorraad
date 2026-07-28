@@ -261,8 +261,9 @@
   .price-chips{display:flex; gap:6px; flex-wrap:wrap; margin:6px 0;}
   .price-chip{
     background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:3px 10px;
-    font-size:0.78rem; font-weight:600;
+    font-size:0.78rem; font-weight:600; display:inline-block;
   }
+  a.price-chip:hover{border-color:var(--forest); box-shadow:0 0 0 1px var(--forest) inset;}
   .disclaimer{color:var(--ink-soft); font-size:0.72rem; margin-top:4px;}
 
   footer.note{
@@ -851,7 +852,14 @@ async function vergelijkPrijs(itemName, resultEl){
       resultEl.innerHTML = `
         <div class="price-result">
           <strong>Gemiddeld: € ${data.gemiddelde}</strong> · ${data.aantalGevonden} prijzen gevonden
-          <div class="price-chips">${data.gevondenPrijzen.map(p => `<span class="price-chip">€ ${Number(p).toFixed(2)}</span>`).join('')}</div>
+          <div class="price-chips">${data.gevondenPrijzen.map(entry => {
+            const priceText = `€ ${Number(entry.price).toFixed(2)}`;
+            const shopLabel = entry.domain ? ` <small style="opacity:0.65;">${entry.domain}</small>` : '';
+            if(entry.url){
+              return `<a class="price-chip" href="${entry.url}" target="_blank" rel="noopener" style="text-decoration:none; color:inherit;">${priceText}${shopLabel}</a>`;
+            }
+            return `<span class="price-chip">${priceText}${shopLabel}</span>`;
+          }).join('')}</div>
           <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie.</div>
         </div>
       `;
@@ -869,11 +877,6 @@ function renderMarktprijsView(){
   document.getElementById('addItemRow').style.display = 'none';
   const wrap = document.getElementById('items');
   wrap.innerHTML = '';
-
-  const warning = document.createElement('div');
-  warning.className = 'market-warning';
-  warning.innerHTML = `🧪 <strong>Experimentele testfunctie.</strong> Dit haalt prijsdata op via DataForSEO (Google Shopping data, Nederlandse markt), nog zonder EAN-matching — verschillende varianten/maten van "hetzelfde" artikel kunnen dus door elkaar staan. Resultaten kunnen van dag tot dag verschillen, dat is normaal bij live marktdata. Een opzoeking duurt 5-20 seconden. Enkel gebruiken als ruwe indicatie.`;
-  wrap.appendChild(warning);
 
   const allBtnRow = document.createElement('div');
   allBtnRow.style.marginBottom = '14px';
