@@ -408,7 +408,7 @@ let searchQuery = '';
 /* ================= Data laden uit Supabase ================= */
 
 async function loadItems(){
-  const { data, error } = await sb.from('items').select('*').order('created_at');
+  const { data, error } = await sb.from('items').select('*').order('category').order('name');
   if(error){ console.error('Kon artikelen niet laden:', error); return; }
   items = data || [];
 }
