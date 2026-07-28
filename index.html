@@ -821,65 +821,44 @@ function renderSuppliersView(){
 async function vergelijkPrijs(itemName, resultEl){
   resultEl.innerHTML = '⏳ Zoekopdracht starten…';
   try{
-    // Start BE en NL gelijktijdig — de gebruiker ziet nu 1 gecombineerd resultaat.
-    const [startBE, startNL] = await Promise.all(['be','nl'].map(land =>
-      fetch(`/api/marktprijs-start?query=${encodeURIComponent(itemName)}&land=${land}`).then(r => r.json())
-    ));
+    const startRes = await fetch(`/api/marktprijs-start?query=${encodeURIComponent(itemName)}&land=nl`);
+    const startData = await startRes.json();
 
-    const tasks = [];
-    if(startBE.task_id) tasks.push({ land: 'be', id: startBE.task_id });
-    if(startNL.task_id) tasks.push({ land: 'nl', id: startNL.task_id });
-
-    if(tasks.length === 0){
-      resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${startBE.error || startNL.error || 'Kon geen taak starten.'}</div>`;
+    if(startData.error || !startData.task_id){
+      resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${startData.error || 'Kon geen taak starten.'}</div>`;
       return;
     }
 
-    const combinedPrices = [];
-    const doneLands = new Set();
-    const countPerLand = { be: null, nl: null }; // null = nooit "ready" geraakt (timeout); 0 of hoger = wel klaar
     const maxTries = 12; // 12 x 2s = 24 sec. max wachttijd
-
-    for(let attempt = 1; attempt <= maxTries && doneLands.size < tasks.length; attempt++){
+    for(let attempt = 1; attempt <= maxTries; attempt++){
       resultEl.innerHTML = `⏳ Bezig met zoeken… (${attempt * 2}s)`;
       await new Promise(r => setTimeout(r, 2000));
 
-      for(const t of tasks){
-        if(doneLands.has(t.land)) continue;
-        const pollRes = await fetch(`/api/marktprijs-result?task_id=${encodeURIComponent(t.id)}`);
-        const data = await pollRes.json();
-        if(data.error){ doneLands.add(t.land); countPerLand[t.land] = 'fout'; continue; }
-        if(!data.ready) continue;
-        doneLands.add(t.land);
-        const found = data.gevondenPrijzen || [];
-        countPerLand[t.land] = found.length;
-        found.forEach(p => combinedPrices.push({ price: Number(p), land: t.land }));
+      const pollRes = await fetch(`/api/marktprijs-result?task_id=${encodeURIComponent(startData.task_id)}`);
+      const data = await pollRes.json();
+
+      if(data.error){
+        resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${data.error}</div>`;
+        return;
       }
-    }
+      if(!data.ready) continue;
 
-    // Landen die nooit "ready" werden binnen de 24 sec. blijven op null staan (= timeout, geen "0 resultaten").
-    tasks.forEach(t => { if(!doneLands.has(t.land)) countPerLand[t.land] = 'timeout'; });
+      if(!data.gemiddelde){
+        resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}".</div>`;
+        return;
+      }
 
-    const landSummary = Object.entries(countPerLand)
-      .map(([land, count]) => {
-        if(count === 'timeout') return `${land.toUpperCase()}: geen antwoord binnen 24s`;
-        if(count === 'fout') return `${land.toUpperCase()}: fout bij opzoeken`;
-        return `${land.toUpperCase()}: ${count} gevonden`;
-      }).join(' · ');
-
-    if(combinedPrices.length === 0){
-      resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}".<br><small>${landSummary}</small></div>`;
+      resultEl.innerHTML = `
+        <div class="price-result">
+          <strong>Gemiddeld: € ${data.gemiddelde}</strong> · ${data.aantalGevonden} prijzen gevonden
+          <div class="price-chips">${data.gevondenPrijzen.map(p => `<span class="price-chip">€ ${Number(p).toFixed(2)}</span>`).join('')}</div>
+          <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie.</div>
+        </div>
+      `;
       return;
     }
 
-    const avg = (combinedPrices.reduce((s,p) => s + p.price, 0) / combinedPrices.length).toFixed(2);
-    resultEl.innerHTML = `
-      <div class="price-result">
-        <strong>Gemiddeld: € ${avg}</strong> · ${combinedPrices.length} prijzen gevonden (BE + NL)
-        <div class="price-chips">${combinedPrices.map(p => `<span class="price-chip">€ ${p.price.toFixed(2)} <small style="opacity:0.6;">${p.land.toUpperCase()}</small></span>`).join('')}</div>
-        <div class="disclaimer">${landSummary} · ⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie.</div>
-      </div>
-    `;
+    resultEl.innerHTML = `<div class="empty-note">Duurde te lang (langer dan 24 sec). Probeer straks opnieuw.</div>`;
   }catch(err){
     resultEl.innerHTML = `<div class="blocked-msg">⚠️ Kon de testfunctie niet bereiken. Foutmelding: ${err.message}</div>`;
   }
@@ -893,7 +872,7 @@ function renderMarktprijsView(){
 
   const warning = document.createElement('div');
   warning.className = 'market-warning';
-  warning.innerHTML = `🧪 <strong>Experimentele testfunctie.</strong> Dit haalt prijsdata op via DataForSEO (Google Shopping data voor BE/NL), nog zonder EAN-matching — verschillende varianten/maten van "hetzelfde" artikel kunnen dus door elkaar staan. Een opzoeking duurt 5-20 seconden. Enkel gebruiken als ruwe indicatie.`;
+  warning.innerHTML = `🧪 <strong>Experimentele testfunctie.</strong> Dit haalt prijsdata op via DataForSEO (Google Shopping data, Nederlandse markt), nog zonder EAN-matching — verschillende varianten/maten van "hetzelfde" artikel kunnen dus door elkaar staan. Resultaten kunnen van dag tot dag verschillen, dat is normaal bij live marktdata. Een opzoeking duurt 5-20 seconden. Enkel gebruiken als ruwe indicatie.`;
   wrap.appendChild(warning);
 
   const allBtnRow = document.createElement('div');
@@ -919,7 +898,7 @@ function renderMarktprijsView(){
         <div class="market-result" data-action="result"></div>
       </div>
       <div class="controls">
-        <button class="btn btn-slate" data-action="vergelijk">🔍 Vergelijk (BE + NL)</button>
+        <button class="btn btn-slate" data-action="vergelijk">🔍 Vergelijken</button>
       </div>
     `;
     const resultEl = row.querySelector('[data-action="result"]');
