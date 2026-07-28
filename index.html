@@ -819,7 +819,7 @@ function renderSuppliersView(){
 
 /* ================= Rendering: Marktprijs (experimenteel) ================= */
 
-async function vergelijkPrijs(itemName, resultEl){
+async function vergelijkPrijs(itemName, ownPriceText, resultEl){
   resultEl.innerHTML = '⏳ Zoekopdracht starten…';
   try{
     const startRes = await fetch(`/api/marktprijs-start?query=${encodeURIComponent(itemName)}&land=nl`);
@@ -830,12 +830,17 @@ async function vergelijkPrijs(itemName, resultEl){
       return;
     }
 
+    // Eigen winkelprijs omzetten naar een puur getal (bv. "€ 97,95" -> 97.95),
+    // gebruikt straks om onrealistische mismatches (bv. verkeerd product) te filteren.
+    const ownPriceMatch = (ownPriceText || '').match(/(\d+)[.,](\d{2})/);
+    const ownPriceNum = ownPriceMatch ? parseFloat(`${ownPriceMatch[1]}.${ownPriceMatch[2]}`) : '';
+
     const maxTries = 12; // 12 x 2s = 24 sec. max wachttijd
     for(let attempt = 1; attempt <= maxTries; attempt++){
       resultEl.innerHTML = `⏳ Bezig met zoeken… (${attempt * 2}s)`;
       await new Promise(r => setTimeout(r, 2000));
 
-      const pollRes = await fetch(`/api/marktprijs-result?task_id=${encodeURIComponent(startData.task_id)}`);
+      const pollRes = await fetch(`/api/marktprijs-result?task_id=${encodeURIComponent(startData.task_id)}&query=${encodeURIComponent(itemName)}&expected_price=${ownPriceNum}`);
       const data = await pollRes.json();
 
       if(data.error){
@@ -860,7 +865,7 @@ async function vergelijkPrijs(itemName, resultEl){
             }
             return `<span class="price-chip">${priceText}${shopLabel}</span>`;
           }).join('')}</div>
-          <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie.</div>
+          <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie. ${data.aantalGefilterd ? `(${data.aantalGefilterd} afwijkend resultaat weggefilterd)` : ''}</div>
         </div>
       `;
       return;
@@ -905,8 +910,8 @@ function renderMarktprijsView(){
       </div>
     `;
     const resultEl = row.querySelector('[data-action="result"]');
-    row.querySelector('[data-action="vergelijk"]').onclick = () => vergelijkPrijs(it.name, resultEl);
-    rows.push({ name: it.name, resultEl });
+    row.querySelector('[data-action="vergelijk"]').onclick = () => vergelijkPrijs(it.name, it.price, resultEl);
+    rows.push({ name: it.name, price: it.price, resultEl });
     wrap.appendChild(row);
   });
 
@@ -917,7 +922,7 @@ function renderMarktprijsView(){
     btn.style.opacity = '0.6';
     for(let i = 0; i < rows.length; i++){
       progress.textContent = `bezig: ${i + 1} van ${rows.length}…`;
-      await vergelijkPrijs(rows[i].name, rows[i].resultEl);
+      await vergelijkPrijs(rows[i].name, rows[i].price, rows[i].resultEl);
     }
     progress.textContent = `klaar — ${rows.length} artikelen vergeleken.`;
     btn.disabled = false;
