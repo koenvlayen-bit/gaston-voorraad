@@ -408,7 +408,7 @@ let searchQuery = '';
 /* ================= Data laden uit Supabase ================= */
 
 async function loadItems(){
-  const { data, error } = await sb.from('items').select('*').order('category').order('name');
+  const { data, error } = await sb.from('items').select('*').order('name');
   if(error){ console.error('Kon artikelen niet laden:', error); return; }
   items = data || [];
 }
@@ -446,7 +446,7 @@ function setupRealtime(){
 /* ================= Helpers ================= */
 
 function itemsForCat(catKey){
-  return items.filter(it => it.category === catKey);
+  return items.filter(it => it.category === catKey).sort((a,b) => a.name.localeCompare(b.name));
 }
 function countLow(catKey){
   return itemsForCat(catKey).filter(it => it.stock < 2).length;
@@ -454,8 +454,18 @@ function countLow(catKey){
 function countOnOrder(catKey){
   return itemsForCat(catKey).filter(it => it.on_order > 0).length;
 }
+// Alle artikelen, maar in de vaste categorie-volgorde (Pixie, Boe, Moli, Tuur, Nova,
+// Seizoen) — NIET de alfabetische DB-volgorde, want die zou "Nova" vóór "Pixie"
+// zetten. Binnen elke categorie alfabetisch op naam.
+function orderedItems(){
+  const result = [];
+  Object.keys(CATEGORY_META).forEach(catKey => {
+    result.push(...itemsForCat(catKey));
+  });
+  return result;
+}
 function allItemsFlat(){
-  return items.map(it => ({
+  return orderedItems().map(it => ({
     ...it,
     catKey: it.category,
     catLabel: CATEGORY_META[it.category] ? CATEGORY_META[it.category].label : it.category,
@@ -835,7 +845,7 @@ async function vergelijkPrijs(itemName, ownPriceText, resultEl){
     const ownPriceMatch = (ownPriceText || '').match(/(\d+)[.,](\d{2})/);
     const ownPriceNum = ownPriceMatch ? parseFloat(`${ownPriceMatch[1]}.${ownPriceMatch[2]}`) : '';
 
-    const maxTries = 12; // 12 x 2s = 24 sec. max wachttijd
+    const maxTries = 25; // 25 x 2s = 50 sec. max wachttijd
     for(let attempt = 1; attempt <= maxTries; attempt++){
       resultEl.innerHTML = `⏳ Bezig met zoeken… (${attempt * 2}s)`;
       await new Promise(r => setTimeout(r, 2000));
@@ -871,7 +881,7 @@ async function vergelijkPrijs(itemName, ownPriceText, resultEl){
       return;
     }
 
-    resultEl.innerHTML = `<div class="empty-note">Duurde te lang (langer dan 24 sec). Probeer straks opnieuw.</div>`;
+    resultEl.innerHTML = `<div class="empty-note">Duurde te lang (langer dan 50 sec) — DataForSEO's wachtrij lijkt momenteel trager te reageren. Probeer straks opnieuw.</div>`;
   }catch(err){
     resultEl.innerHTML = `<div class="blocked-msg">⚠️ Kon de testfunctie niet bereiken. Foutmelding: ${err.message}</div>`;
   }
