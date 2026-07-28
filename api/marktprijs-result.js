@@ -56,28 +56,36 @@ module.exports = async function handler(req, res) {
     // Beperkt tot de eerste 10 (in de volgorde die Google/DataForSEO al op relevantie
     // sorteert) — voldoende voor een indicatie, en voorkomt dat één zoekopdracht
     // tientallen irrelevante randresultaten meetelt in het gemiddelde.
-    const prices = items
+    const priceEntries = items
       .map((it) => {
+        let price = null;
         if (it.price && typeof it.price === "object") {
-          return it.price.current ?? it.price.value ?? it.price.regular ?? null;
+          price = it.price.current ?? it.price.value ?? it.price.regular ?? null;
+        } else if (typeof it.price === "number") {
+          price = it.price;
         }
-        if (typeof it.price === "number") return it.price;
-        return null;
+        if (typeof price !== "number" || price <= 0) return null;
+        return {
+          price,
+          url: it.url || null,
+          domain: it.domain || it.seller || null,
+        };
       })
-      .filter((p) => typeof p === "number" && p > 0)
+      .filter((entry) => entry !== null)
       .slice(0, 10);
 
+    const prices = priceEntries.map((e) => e.price);
     const gemiddelde =
       prices.length > 0 ? (prices.reduce((s, p) => s + p, 0) / prices.length).toFixed(2) : null;
 
     return res.status(200).json({
       ready: true,
-      gevondenPrijzen: prices,
-      aantalGevonden: prices.length,
+      gevondenPrijzen: priceEntries,
+      aantalGevonden: priceEntries.length,
       gemiddelde,
       // Tijdelijk: het eerste ruwe item, zodat we de exacte structuur kunnen
       // controleren mocht het prijsveld toch anders heten dan verwacht.
-      debug_raw_first_item: prices.length === 0 ? items[0] : undefined,
+      debug_raw_first_item: priceEntries.length === 0 ? items[0] : undefined,
     });
   } catch (err) {
     return res.status(500).json({ error: "Serverfout bij ophalen van resultaat: " + err.message });
