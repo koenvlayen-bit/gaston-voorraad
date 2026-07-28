@@ -17,11 +17,14 @@ module.exports = async function handler(req, res) {
   const expectedPrice = parseFloat(req.query.expected_price);
   const hasExpectedPrice = !isNaN(expectedPrice) && expectedPrice > 0;
 
-  // Betekenisvolle woorden uit de zoekterm (korte woorden als "de", "en" negeren).
-  const queryWords = originalQuery
-    .replace(/[()]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 2);
+  // Onderscheid tussen "kern"-woorden (het product zelf, bv. "egmont paddenstoel
+  // lamp") en "variant"-woorden tussen haakjes (bv. "(amandel)" of "(rood)").
+  // De kern moet verplicht terugkomen in de titel van een match — een variant/kleur
+  // mag vrij afwijken, want winkels benoemen kleuren niet altijd hetzelfde.
+  const parenMatch = originalQuery.match(/\(([^)]*)\)/);
+  const variantWords = parenMatch ? parenMatch[1].split(/\s+/).filter((w) => w.length > 2) : [];
+  const coreQueryText = originalQuery.replace(/\([^)]*\)/g, " ").trim();
+  const queryWords = coreQueryText.split(/\s+/).filter((w) => w.length > 2);
 
   const login = process.env.DATAFORSEO_LOGIN;
   const password = process.env.DATAFORSEO_PASSWORD;
@@ -83,11 +86,11 @@ module.exports = async function handler(req, res) {
       })
       .filter((entry) => entry !== null);
 
-    // Filter 1 — titel-overlap: het gevonden product moet ALLE betekenisvolle
-    // woorden uit de zoekterm in zijn titel hebben (niet enkel een meerderheid).
-    // Dat is strenger, met opzet: "Egmont paddenstoel spaarpot rood" bevat wel
-    // "Egmont", "paddenstoel" en "rood", maar mist "lamp" — en dat ene ontbrekende
-    // woord is precies waarom het een ander product is. Beter te streng dan te los.
+    // Filter 1 — titel-overlap: het gevonden product moet ALLE kern-woorden uit
+    // de zoekterm in zijn titel hebben (bv. "egmont", "paddenstoel", "lamp").
+    // Variant-woorden tussen haakjes (kleur/afwerking, bv. "amandel") zijn
+    // bewust NIET verplicht — winkels benoemen kleuren niet altijd hetzelfde,
+    // en dat mag geen correcte match laten afvallen.
     const titleFiltered = queryWords.length > 0
       ? rawEntries.filter((e) => {
           if (!e.title) return true; // geen titel gekregen -> niet kunnen checken, laten staan
