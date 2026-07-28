@@ -830,64 +830,40 @@ function renderSuppliersView(){
 /* ================= Rendering: Marktprijs (experimenteel) ================= */
 
 async function vergelijkPrijs(itemName, ownPriceText, resultEl){
-  resultEl.innerHTML = '⏳ Zoekopdracht starten…';
+  resultEl.innerHTML = '⏳ Bezig met zoeken…';
   try{
-    const startRes = await fetch(`/api/marktprijs-start?query=${encodeURIComponent(itemName)}&land=nl`);
-    const startData = await startRes.json();
-
-    if(startData.error || !startData.task_id){
-      resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${startData.error || 'Kon geen taak starten.'}</div>`;
-      return;
-    }
-
     // Eigen winkelprijs omzetten naar een puur getal (bv. "€ 97,95" -> 97.95),
-    // gebruikt straks om onrealistische mismatches (bv. verkeerd product) te filteren.
+    // gebruikt om onrealistische mismatches (bv. verkeerd product) te filteren.
     const ownPriceMatch = (ownPriceText || '').match(/(\d+)[.,](\d{2})/);
     const ownPriceNum = ownPriceMatch ? parseFloat(`${ownPriceMatch[1]}.${ownPriceMatch[2]}`) : '';
 
-    const maxTries = 25; // 25 x 2s = 50 sec. max wachttijd
-    let lastDebugStatus = null;
-    let lastDebugMessage = null;
+    const res = await fetch(`/api/marktprijs?query=${encodeURIComponent(itemName)}&expected_price=${ownPriceNum}`);
+    const data = await res.json();
 
-    for(let attempt = 1; attempt <= maxTries; attempt++){
-      resultEl.innerHTML = `⏳ Bezig met zoeken… (${attempt * 2}s)`;
-      await new Promise(r => setTimeout(r, 2000));
-
-      const pollRes = await fetch(`/api/marktprijs-result?task_id=${encodeURIComponent(startData.task_id)}&query=${encodeURIComponent(itemName)}&expected_price=${ownPriceNum}`);
-      const data = await pollRes.json();
-
-      if(data.debug_status !== undefined) lastDebugStatus = data.debug_status;
-      if(data.debug_message !== undefined) lastDebugMessage = data.debug_message;
-
-      if(data.error){
-        resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${data.error}</div>`;
-        return;
-      }
-      if(!data.ready) continue;
-
-      if(!data.gemiddelde){
-        resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}".</div>`;
-        return;
-      }
-
-      resultEl.innerHTML = `
-        <div class="price-result">
-          <strong>Gemiddeld: € ${data.gemiddelde}</strong> · ${data.aantalGevonden} prijzen gevonden
-          <div class="price-chips">${data.gevondenPrijzen.map(entry => {
-            const priceText = `€ ${Number(entry.price).toFixed(2)}`;
-            const shopLabel = entry.domain ? ` <small style="opacity:0.65;">${entry.domain}</small>` : '';
-            if(entry.url){
-              return `<a class="price-chip" href="${entry.url}" target="_blank" rel="noopener" style="text-decoration:none; color:inherit;">${priceText}${shopLabel}</a>`;
-            }
-            return `<span class="price-chip">${priceText}${shopLabel}</span>`;
-          }).join('')}</div>
-          <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie. ${data.aantalGefilterd ? `(${data.aantalGefilterd} afwijkend resultaat weggefilterd)` : ''}</div>
-        </div>
-      `;
+    if(data.error){
+      resultEl.innerHTML = `<div class="blocked-msg">⚠️ ${data.error}</div>`;
       return;
     }
 
-    resultEl.innerHTML = `<div class="empty-note">Duurde te lang (langer dan 50 sec).<br><small>DataForSEO-status: ${lastDebugStatus ?? 'onbekend'} — ${lastDebugMessage ?? 'geen boodschap ontvangen'}</small></div>`;
+    if(!data.gemiddelde){
+      resultEl.innerHTML = `<div class="empty-note">Geen prijzen gevonden voor "${itemName}".</div>`;
+      return;
+    }
+
+    resultEl.innerHTML = `
+      <div class="price-result">
+        <strong>Gemiddeld: € ${data.gemiddelde}</strong> · ${data.aantalGevonden} prijzen gevonden
+        <div class="price-chips">${data.gevondenPrijzen.map(entry => {
+          const priceText = `€ ${Number(entry.price).toFixed(2)}`;
+          const shopLabel = entry.domain ? ` <small style="opacity:0.65;">${entry.domain}</small>` : '';
+          if(entry.url){
+            return `<a class="price-chip" href="${entry.url}" target="_blank" rel="noopener" style="text-decoration:none; color:inherit;">${priceText}${shopLabel}</a>`;
+          }
+          return `<span class="price-chip">${priceText}${shopLabel}</span>`;
+        }).join('')}</div>
+        <div class="disclaimer">⚠️ Experimenteel, zonder EAN-matching — enkel als indicatie. ${data.aantalGefilterd ? `(${data.aantalGefilterd} afwijkend resultaat weggefilterd)` : ''}</div>
+      </div>
+    `;
   }catch(err){
     resultEl.innerHTML = `<div class="blocked-msg">⚠️ Kon de testfunctie niet bereiken. Foutmelding: ${err.message}</div>`;
   }
