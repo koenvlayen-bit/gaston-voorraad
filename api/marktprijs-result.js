@@ -11,6 +11,18 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: "Parameter 'task_id' ontbreekt." });
   }
 
+  // Optioneel: originele zoekterm + eigen winkelprijs, gebruikt om duidelijke
+  // mismatches (bv. een heel ander product dat er toevallig op lijkt) te filteren.
+  const originalQuery = (req.query.query || "").toLowerCase();
+  const expectedPrice = parseFloat(req.query.expected_price);
+  const hasExpectedPrice = !isNaN(expectedPrice) && expectedPrice > 0;
+
+  // Betekenisvolle woorden uit de zoekterm (korte woorden als "de", "en" negeren).
+  const queryWords = originalQuery
+    .replace(/[()]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+
   const login = process.env.DATAFORSEO_LOGIN;
   const password = process.env.DATAFORSEO_PASSWORD;
   if (!login || !password) {
@@ -53,10 +65,7 @@ module.exports = async function handler(req, res) {
 
     // DataForSEO product-items geven prijs meestal als een object terug
     // (bv. { current, regular, ... }) — we proberen de meest voorkomende vormen.
-    // Beperkt tot de eerste 10 (in de volgorde die Google/DataForSEO al op relevantie
-    // sorteert) — voldoende voor een indicatie, en voorkomt dat één zoekopdracht
-    // tientallen irrelevante randresultaten meetelt in het gemiddelde.
-    const priceEntries = items
+    const rawEntries = items
       .map((it) => {
         let price = null;
         if (it.price && typeof it.price === "object") {
@@ -69,10 +78,32 @@ module.exports = async function handler(req, res) {
           price,
           url: it.url || null,
           domain: it.domain || it.seller || null,
+          title: (it.title || "").toLowerCase(),
         };
       })
-      .filter((entry) => entry !== null)
-      .slice(0, 10);
+      .filter((entry) => entry !== null);
+
+    // Filter 1 — titel-overlap: het gevonden product moet minstens de helft van
+    // de betekenisvolle woorden uit de zoekterm in zijn titel hebben. Vangt
+    // duidelijke mismatches op (bv. een spaarpot i.p.v. een lamp), al is dit
+    // geen garantie zonder EAN-code.
+    const titleFiltered = queryWords.length > 0
+      ? rawEntries.filter((e) => {
+          if (!e.title) return true; // geen titel gekregen -> niet kunnen checken, laten staan
+          const matchCount = queryWords.filter((w) => e.title.includes(w)).length;
+          return matchCount / queryWords.length >= 0.5;
+        })
+      : rawEntries;
+
+    // Filter 2 — prijs-plausibiliteit: als we de eigen winkelprijs kennen, negeer
+    // resultaten die extreem afwijken (buiten 40%-250% van die prijs) — meestal
+    // een teken dat het om een ander product gaat, niet om een echte prijsverschil.
+    const priceFiltered = hasExpectedPrice
+      ? titleFiltered.filter((e) => e.price >= expectedPrice * 0.4 && e.price <= expectedPrice * 2.5)
+      : titleFiltered;
+
+    const priceEntries = priceFiltered.slice(0, 10);
+    const aantalGefilterd = rawEntries.length - priceEntries.length;
 
     const prices = priceEntries.map((e) => e.price);
     const gemiddelde =
@@ -82,9 +113,8 @@ module.exports = async function handler(req, res) {
       ready: true,
       gevondenPrijzen: priceEntries,
       aantalGevonden: priceEntries.length,
+      aantalGefilterd: aantalGefilterd > 0 ? aantalGefilterd : 0,
       gemiddelde,
-      // Tijdelijk: het eerste ruwe item, zodat we de exacte structuur kunnen
-      // controleren mocht het prijsveld toch anders heten dan verwacht.
       debug_raw_first_item: priceEntries.length === 0 ? items[0] : undefined,
     });
   } catch (err) {
