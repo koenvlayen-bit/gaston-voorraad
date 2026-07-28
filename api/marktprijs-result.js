@@ -83,15 +83,15 @@ module.exports = async function handler(req, res) {
       })
       .filter((entry) => entry !== null);
 
-    // Filter 1 — titel-overlap: het gevonden product moet minstens de helft van
-    // de betekenisvolle woorden uit de zoekterm in zijn titel hebben. Vangt
-    // duidelijke mismatches op (bv. een spaarpot i.p.v. een lamp), al is dit
-    // geen garantie zonder EAN-code.
+    // Filter 1 — titel-overlap: het gevonden product moet ALLE betekenisvolle
+    // woorden uit de zoekterm in zijn titel hebben (niet enkel een meerderheid).
+    // Dat is strenger, met opzet: "Egmont paddenstoel spaarpot rood" bevat wel
+    // "Egmont", "paddenstoel" en "rood", maar mist "lamp" — en dat ene ontbrekende
+    // woord is precies waarom het een ander product is. Beter te streng dan te los.
     const titleFiltered = queryWords.length > 0
       ? rawEntries.filter((e) => {
           if (!e.title) return true; // geen titel gekregen -> niet kunnen checken, laten staan
-          const matchCount = queryWords.filter((w) => e.title.includes(w)).length;
-          return matchCount / queryWords.length >= 0.5;
+          return queryWords.every((w) => e.title.includes(w));
         })
       : rawEntries;
 
