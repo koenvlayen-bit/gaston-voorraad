@@ -11,20 +11,10 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: "Parameter 'task_id' ontbreekt." });
   }
 
-  // Optioneel: originele zoekterm + eigen winkelprijs, gebruikt om duidelijke
-  // mismatches (bv. een heel ander product dat er toevallig op lijkt) te filteren.
-  const originalQuery = (req.query.query || "").toLowerCase();
+  // Optioneel: eigen winkelprijs, gebruikt om duidelijke mismatches (bv. een
+  // heel ander product dat er toevallig op lijkt) te filteren op prijs.
   const expectedPrice = parseFloat(req.query.expected_price);
   const hasExpectedPrice = !isNaN(expectedPrice) && expectedPrice > 0;
-
-  // Onderscheid tussen "kern"-woorden (het product zelf, bv. "egmont paddenstoel
-  // lamp") en "variant"-woorden tussen haakjes (bv. "(amandel)" of "(rood)").
-  // De kern moet verplicht terugkomen in de titel van een match — een variant/kleur
-  // mag vrij afwijken, want winkels benoemen kleuren niet altijd hetzelfde.
-  const parenMatch = originalQuery.match(/\(([^)]*)\)/);
-  const variantWords = parenMatch ? parenMatch[1].split(/\s+/).filter((w) => w.length > 2) : [];
-  const coreQueryText = originalQuery.replace(/\([^)]*\)/g, " ").trim();
-  const queryWords = coreQueryText.split(/\s+/).filter((w) => w.length > 2);
 
   const login = process.env.DATAFORSEO_LOGIN;
   const password = process.env.DATAFORSEO_PASSWORD;
@@ -86,24 +76,14 @@ module.exports = async function handler(req, res) {
       })
       .filter((entry) => entry !== null);
 
-    // Filter 1 — titel-overlap: het gevonden product moet ALLE kern-woorden uit
-    // de zoekterm in zijn titel hebben (bv. "egmont", "paddenstoel", "lamp").
-    // Variant-woorden tussen haakjes (kleur/afwerking, bv. "amandel") zijn
-    // bewust NIET verplicht — winkels benoemen kleuren niet altijd hetzelfde,
-    // en dat mag geen correcte match laten afvallen.
-    const titleFiltered = queryWords.length > 0
-      ? rawEntries.filter((e) => {
-          if (!e.title) return true; // geen titel gekregen -> niet kunnen checken, laten staan
-          return queryWords.every((w) => e.title.includes(w));
-        })
-      : rawEntries;
-
-    // Filter 2 — prijs-plausibiliteit: als we de eigen winkelprijs kennen, negeer
-    // resultaten die extreem afwijken (buiten 40%-250% van die prijs) — meestal
-    // een teken dat het om een ander product gaat, niet om een echte prijsverschil.
+    // Filter — enkel op prijs-plausibiliteit (geen tekst/titel-check meer: die
+    // bleek te streng en verwierp ook correcte matches met een net iets andere
+    // omschrijving). Als we de eigen winkelprijs kennen, negeer resultaten die
+    // extreem afwijken (buiten 40%-250% van die prijs) — meestal een teken dat
+    // het om een ander product gaat, niet om een echt prijsverschil.
     const priceFiltered = hasExpectedPrice
-      ? titleFiltered.filter((e) => e.price >= expectedPrice * 0.4 && e.price <= expectedPrice * 2.5)
-      : titleFiltered;
+      ? rawEntries.filter((e) => e.price >= expectedPrice * 0.4 && e.price <= expectedPrice * 2.5)
+      : rawEntries;
 
     const priceEntries = priceFiltered.slice(0, 10);
     const aantalGefilterd = rawEntries.length - priceEntries.length;
