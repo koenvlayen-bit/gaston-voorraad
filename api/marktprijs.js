@@ -16,6 +16,14 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: "Parameter 'query' (artikelnaam) ontbreekt." });
   }
 
+  // Welk gekend merk staat vooraan in de artikelnaam? (bv. "Egmont bowling set" -> "egmont")
+  // Dat merk moet straks terugkomen in de titel van een match — dat vangt precies
+  // het soort fout op dat de prijsfilter alleen mist: een generieke bowlingset van
+  // een ander merk die toevallig in een plausibele prijsmarge valt.
+  const KNOWN_BRANDS = ["egmont", "moulin roty", "goki", "knetä", "kneta", "snackbackman"];
+  const queryLower = query.toLowerCase();
+  const detectedBrand = KNOWN_BRANDS.find((b) => queryLower.startsWith(b));
+
   const apiKey = process.env.SERPAPI_KEY;
   if (!apiKey) {
     return res.status(500).json({
@@ -50,16 +58,24 @@ module.exports = async function handler(req, res) {
           price,
           url: r.product_link || r.link || null,
           domain: r.source || null,
+          title: (r.title || "").toLowerCase(),
         };
       })
       .filter((e) => e !== null);
 
-    // Filter op prijs-plausibiliteit: als we de eigen winkelprijs kennen, negeer
+    // Filter 1 — merk-check: als de artikelnaam met een gekend merk begint, moet
+    // dat merk terugkomen in de titel van het resultaat. Vangt "ander merk,
+    // toevallig gelijkaardige prijs" op (bv. een generieke bowlingset i.p.v. Egmont).
+    const brandFiltered = detectedBrand
+      ? rawEntries.filter((e) => e.title.includes(detectedBrand))
+      : rawEntries;
+
+    // Filter 2 — prijs-plausibiliteit: als we de eigen winkelprijs kennen, negeer
     // resultaten die extreem afwijken (buiten 40%-250% van die prijs) — meestal
     // een teken dat het om een ander product gaat, niet om een echt prijsverschil.
     const priceFiltered = hasExpectedPrice
-      ? rawEntries.filter((e) => e.price >= expectedPrice * 0.4 && e.price <= expectedPrice * 2.5)
-      : rawEntries;
+      ? brandFiltered.filter((e) => e.price >= expectedPrice * 0.4 && e.price <= expectedPrice * 2.5)
+      : brandFiltered;
 
     const priceEntries = priceFiltered.slice(0, 10);
     const aantalGefilterd = rawEntries.length - priceEntries.length;
