@@ -16,13 +16,15 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: "Parameter 'query' (artikelnaam) ontbreekt." });
   }
 
-  // Welk gekend merk staat vooraan in de artikelnaam? (bv. "Egmont bowling set" -> "egmont")
-  // Dat merk moet straks terugkomen in de titel van een match — dat vangt precies
-  // het soort fout op dat de prijsfilter alleen mist: een generieke bowlingset van
-  // een ander merk die toevallig in een plausibele prijsmarge valt.
-  const KNOWN_BRANDS = ["egmont", "moulin roty", "goki", "knetä", "kneta", "snackbackman"];
+  // Kern-woorden uit de artikelnaam (het merk + het specifieke model/product,
+  // bv. "goki honolulu puzzel") — deze moeten ALLEMAAL terugkomen in de titel
+  // van een match. Woorden tussen haakjes (kleur/afwerking, bv. "(rood)") tellen
+  // NIET mee, want winkels benoemen kleuren niet altijd op dezelfde manier —
+  // maar een modelnaam als "Honolulu" verandert nooit van winkel tot winkel,
+  // dus die moet wél letterlijk terugkomen.
   const queryLower = query.toLowerCase();
-  const detectedBrand = KNOWN_BRANDS.find((b) => queryLower.startsWith(b));
+  const coreQueryText = queryLower.replace(/\([^)]*\)/g, " ").trim();
+  const coreWords = coreQueryText.split(/\s+/).filter((w) => w.length > 2);
 
   const apiKey = process.env.SERPAPI_KEY;
   if (!apiKey) {
@@ -63,19 +65,20 @@ module.exports = async function handler(req, res) {
       })
       .filter((e) => e !== null);
 
-    // Filter 1 — merk-check: als de artikelnaam met een gekend merk begint, moet
-    // dat merk terugkomen in de titel van het resultaat. Vangt "ander merk,
-    // toevallig gelijkaardige prijs" op (bv. een generieke bowlingset i.p.v. Egmont).
-    const brandFiltered = detectedBrand
-      ? rawEntries.filter((e) => e.title.includes(detectedBrand))
+    // Filter 1 — kern-woorden: ALLE woorden uit de artikelnaam (behalve wat
+    // tussen haakjes staat) moeten terugkomen in de titel. Vangt zowel "ander
+    // merk" (bv. generieke bowlingset) als "ander model van hetzelfde merk"
+    // (bv. een andere Goki-puzzel dan "Honolulu") in één keer op.
+    const titleFiltered = coreWords.length > 0
+      ? rawEntries.filter((e) => coreWords.every((w) => e.title.includes(w)))
       : rawEntries;
 
     // Filter 2 — prijs-plausibiliteit: als we de eigen winkelprijs kennen, negeer
     // resultaten die extreem afwijken (buiten 40%-250% van die prijs) — meestal
     // een teken dat het om een ander product gaat, niet om een echt prijsverschil.
     const priceFiltered = hasExpectedPrice
-      ? brandFiltered.filter((e) => e.price >= expectedPrice * 0.4 && e.price <= expectedPrice * 2.5)
-      : brandFiltered;
+      ? titleFiltered.filter((e) => e.price >= expectedPrice * 0.4 && e.price <= expectedPrice * 2.5)
+      : titleFiltered;
 
     const priceEntries = priceFiltered.slice(0, 10);
     const aantalGefilterd = rawEntries.length - priceEntries.length;
